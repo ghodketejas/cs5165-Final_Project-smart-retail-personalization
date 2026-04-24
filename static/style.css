@@ -1,14 +1,42 @@
-body {
-    background-color: #f5f7fa;
+:root {
+    --sr-bg: #f0f4f8;
+    --sr-surface: #ffffff;
+    --sr-nav-start: #0f2744;
+    --sr-nav-end: #1a3a5c;
+    --sr-accent: #0d9488;
+    --sr-radius: 14px;
 }
 
-.navbar {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+body {
+    font-family: "DM Sans", system-ui, -apple-system, sans-serif;
+    background: linear-gradient(180deg, var(--sr-bg) 0%, #e8eef5 100%);
+    color: #1a2332;
+}
+
+.site-nav {
+    background: linear-gradient(110deg, var(--sr-nav-start) 0%, var(--sr-nav-end) 55%, #143d52 100%) !important;
+}
+
+.navbar-brand {
+    letter-spacing: -0.03em;
+}
+
+.page-hero {
+    background: linear-gradient(135deg, #ffffff 0%, #f4f8fc 45%, #eef6f4 100%);
+    border: 1px solid rgba(13, 148, 136, 0.12);
+    border-radius: var(--sr-radius);
+    padding: 1.75rem 2rem;
+    box-shadow: 0 8px 32px rgba(15, 39, 68, 0.06);
 }
 
 .card {
-    border: none;
-    border-radius: 12px;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: var(--sr-radius);
+}
+
+.card-header {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    font-weight: 600;
 }
 
 .table-responsive {
@@ -16,37 +44,68 @@ body {
     overflow-x: auto;
     overflow-y: visible;
     border: 1px solid #dee2e6;
-    background: white;
-    border-radius: 8px;
+    background: var(--sr-surface);
+    border-radius: 10px;
 }
 
 .table {
-    font-size: 12px;
+    font-size: 0.8125rem;
     white-space: nowrap;
     margin-bottom: 0;
 }
 
 .table th {
-    background-color: #212529;
-    color: white;
+    background-color: #1e3a52;
+    color: #fff;
+    font-weight: 600;
     position: sticky;
     top: 0;
+    border-color: #2a4d6a;
 }
 
 .table td,
 .table th {
-    padding: 8px;
+    padding: 0.55rem 0.75rem;
     vertical-align: middle;
 }
 
 h1, h2, h3, h4, h5 {
     font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #0f2744;
+}
+
+.lead {
+    font-weight: 500;
 }
 
 .alert {
-    border-radius: 10px;
+    border-radius: 12px;
+    border: none;
 }
 
 .btn {
-    border-radius: 8px;
+    border-radius: 10px;
+    font-weight: 600;
+}
+
+.btn-primary {
+    background: linear-gradient(180deg, #0d6efd 0%, #0b5ed7 100%);
+    border: none;
+}
+
+.btn-success {
+    background: linear-gradient(180deg, #198754 0%, #157347 100%);
+    border: none;
+}
+
+.site-footer {
+    background: rgba(255, 255, 255, 0.85);
+    border-top: 1px solid rgba(15, 39, 68, 0.08);
+}
+
+.form-control:focus,
+.form-select:focus {
+    border-color: var(--sr-accent);
+    box-shadow: 0 0 0 0.2rem rgba(13, 148, 136, 0.2);
 }

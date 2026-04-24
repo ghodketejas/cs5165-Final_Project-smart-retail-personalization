@@ -1,71 +1,149 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2>Retail KPI Dashboard</h2>
+<div class="page-hero mb-4">
+    <h2 class="mb-2">Retail KPI Dashboard</h2>
+    <p class="lead text-muted mb-0">
+        Engagement over time, category performance, <strong>demographics &amp; engagement</strong>,
+        and <strong>brand / organic preferences</strong> (two deliverable question themes).
+    </p>
+</div>
 
-<p>
-    This dashboard explores retail engagement, spending patterns, and product category performance.
+<div class="row mb-4 g-3">
+    <div class="col-md-6">
+        <div class="card p-3 shadow-sm h-100">
+            <h5>Total spend</h5>
+            <h3>${{ total_spend }}</h3>
+            <p class="text-muted small mb-0">Across all joined transaction lines in Azure SQL.</p>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card p-3 shadow-sm h-100">
+            <h5>Unique baskets</h5>
+            <h3>{{ total_transactions }}</h3>
+            <p class="text-muted small mb-0">Distinct shopping baskets in the dataset window.</p>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-2">
+    <div class="col-lg-6">
+        <div class="card p-3 shadow-sm h-100">
+            <h5>Top departments by spend</h5>
+            <p class="text-muted small">Which categories drive the most revenue.</p>
+            {% if dept_labels %}
+            <div style="max-height: 320px;"><canvas id="deptChart"></canvas></div>
+            {% else %}
+            <p class="text-muted small mb-0">No department data.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card p-3 shadow-sm h-100">
+            <h5>Spend over time (by week)</h5>
+            <p class="text-muted small">Engagement trend across sample weeks.</p>
+            {% if week_labels %}
+            <div style="max-height: 320px;"><canvas id="timeChart"></canvas></div>
+            {% else %}
+            <p class="text-muted small mb-0">No weekly spend data.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<hr class="my-4 opacity-25">
+
+<h3 class="h5 text-uppercase text-muted mb-3">Demographics &amp; engagement</h3>
+<p class="text-muted small mb-3">
+    Deliverable theme: how <strong>income band</strong> and <strong>presence of children</strong> relate to spend
+    (proxy for engagement). Household size and store region are also loaded in the warehouse for future slices.
 </p>
 
-<div class="row mb-4">
-    <div class="col-md-6">
-        <div class="card p-3 shadow-sm">
-            <h5>Total Spend</h5>
-            <h3>${{ total_spend }}</h3>
-            <p class="text-muted">Total customer spending across all transactions.</p>
+<div class="row g-3 mb-4">
+    <div class="col-lg-6">
+        <div class="card p-3 shadow-sm h-100">
+            <h5>Spend by income range</h5>
+            {% if demo_income_labels %}
+            <div style="max-height: 300px;"><canvas id="incomeChart"></canvas></div>
+            {% else %}
+            <p class="text-muted small mb-0">No income-range data.</p>
+            {% endif %}
         </div>
     </div>
-
-    <div class="col-md-6">
-        <div class="card p-3 shadow-sm">
-            <h5>Total Transactions</h5>
-            <h3>{{ total_transactions }}</h3>
-            <p class="text-muted">Unique shopping baskets in the dataset.</p>
-        </div>
-    </div>
-</div>
-
-<div class="row">
-    <div class="col-md-6 mb-4">
-        <div class="card p-3 shadow-sm">
-            <h5>Top Departments by Spend</h5>
-            <p class="text-muted">
-                Identifies departments that generate the most customer spending.
-            </p>
-            <canvas id="deptChart"></canvas>
-        </div>
-    </div>
-
-    <div class="col-md-6 mb-4">
-        <div class="card p-3 shadow-sm">
-            <h5>Spend Over Time</h5>
-            <p class="text-muted">
-                Shows how customer engagement and spending change over time.
-            </p>
-            <canvas id="timeChart"></canvas>
+    <div class="col-lg-6">
+        <div class="card p-3 shadow-sm h-100">
+            <h5>Spend by children in household</h5>
+            {% if demo_children_labels %}
+            <div style="max-height: 300px;"><canvas id="childrenChart"></canvas></div>
+            {% else %}
+            <p class="text-muted small mb-0">No children-field data.</p>
+            {% endif %}
         </div>
     </div>
 </div>
 
-<div class="alert alert-success">
-    Business Insight: Departments with higher spending can be prioritized for promotions,
-    inventory planning, and customer personalization strategies.
+<h3 class="h5 text-uppercase text-muted mb-3">Brand preferences</h3>
+<p class="text-muted small mb-3">
+    Deliverable theme: spend split by <strong>brand type</strong> (e.g. national vs private label) and
+    <strong>natural / organic</strong> flags from the product master.
+</p>
+
+<div class="row g-3 mb-4">
+    <div class="col-lg-6">
+        <div class="card p-3 shadow-sm h-100">
+            <h5>Spend by brand type</h5>
+            {% if brand_ty_labels %}
+            <div style="max-height: 300px;"><canvas id="brandTyChart"></canvas></div>
+            {% else %}
+            <p class="text-muted small mb-0">No brand type data.</p>
+            {% endif %}
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card p-3 shadow-sm h-100">
+            <h5>Spend by natural / organic flag</h5>
+            {% if organic_labels %}
+            <div style="max-height: 280px;"><canvas id="organicChart"></canvas></div>
+            {% else %}
+            <p class="text-muted small mb-0">No organic flag data.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="alert alert-success mb-0">
+    <strong>Takeaways:</strong> Higher-spend income bands and segments with children can guide targeted offers;
+    brand-type and organic splits inform assortment, private-label strategy, and sustainable-product campaigns.
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
 <script>
+    const chartOpts = {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: { legend: { display: false } }
+    };
+
+    {% if dept_labels %}
     new Chart(document.getElementById('deptChart'), {
         type: 'bar',
         data: {
             labels: {{ dept_labels|tojson }},
             datasets: [{
                 label: 'Spend',
-                data: {{ dept_values|tojson }}
+                data: {{ dept_values|tojson }},
+                backgroundColor: 'rgba(13, 110, 253, 0.55)',
+                borderColor: 'rgba(13, 110, 253, 1)',
+                borderWidth: 1
             }]
-        }
+        },
+        options: chartOpts
     });
+    {% endif %}
 
+    {% if week_labels %}
     new Chart(document.getElementById('timeChart'), {
         type: 'line',
         data: {
@@ -73,9 +151,90 @@
             datasets: [{
                 label: 'Spend',
                 data: {{ week_values|tojson }},
-                tension: 0.3
+                tension: 0.35,
+                fill: true,
+                backgroundColor: 'rgba(13, 148, 136, 0.15)',
+                borderColor: 'rgba(13, 148, 136, 1)',
+                borderWidth: 2
             }]
-        }
+        },
+        options: chartOpts
     });
+    {% endif %}
+
+    {% if demo_income_labels %}
+    new Chart(document.getElementById('incomeChart'), {
+        type: 'bar',
+        data: {
+            labels: {{ demo_income_labels|tojson }},
+            datasets: [{
+                label: 'Spend',
+                data: {{ demo_income_values|tojson }},
+                backgroundColor: 'rgba(111, 66, 193, 0.55)',
+                borderColor: 'rgba(111, 66, 193, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: Object.assign({}, chartOpts, {
+            scales: { x: { ticks: { maxRotation: 45, minRotation: 0 } } }
+        })
+    });
+    {% endif %}
+
+    {% if demo_children_labels %}
+    new Chart(document.getElementById('childrenChart'), {
+        type: 'bar',
+        data: {
+            labels: {{ demo_children_labels|tojson }},
+            datasets: [{
+                label: 'Spend',
+                data: {{ demo_children_values|tojson }},
+                backgroundColor: 'rgba(220, 53, 69, 0.5)',
+                borderColor: 'rgba(220, 53, 69, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: chartOpts
+    });
+    {% endif %}
+
+    {% if brand_ty_labels %}
+    new Chart(document.getElementById('brandTyChart'), {
+        type: 'bar',
+        data: {
+            labels: {{ brand_ty_labels|tojson }},
+            datasets: [{
+                label: 'Spend',
+                data: {{ brand_ty_values|tojson }},
+                backgroundColor: 'rgba(253, 126, 20, 0.55)',
+                borderColor: 'rgba(253, 126, 20, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: Object.assign({}, chartOpts, {
+            scales: { x: { ticks: { maxRotation: 40 } } }
+        })
+    });
+    {% endif %}
+
+    {% if organic_labels %}
+    new Chart(document.getElementById('organicChart'), {
+        type: 'doughnut',
+        data: {
+            labels: {{ organic_labels|tojson }},
+            datasets: [{
+                data: {{ organic_values|tojson }},
+                backgroundColor: [
+                    'rgba(25, 135, 84, 0.65)',
+                    'rgba(108, 117, 125, 0.55)',
+                    'rgba(13, 202, 240, 0.5)',
+                    'rgba(255, 193, 7, 0.55)'
+                ],
+                borderWidth: 0
+            }]
+        },
+        options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+    });
+    {% endif %}
 </script>
 {% endblock %}

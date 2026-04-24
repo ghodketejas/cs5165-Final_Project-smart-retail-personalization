@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="p-5 bg-light rounded shadow-sm">
-    <h1 class="display-5 fw-bold">Smart Retail Personalization System</h1>
+<div class="page-hero mb-4">
+    <h1 class="display-5 fw-bold">Smart Retail Personalization</h1>
 
     <p class="lead mt-3">
         This Azure-based retail analytics application analyzes household shopping behavior,
@@ -22,14 +22,15 @@
     </p>
     {% endif %}
 
-    <div class="mt-4">
-        <a href="/data-pull" class="btn btn-primary me-2">Search Household Data</a>
-        <a href="/dashboard" class="btn btn-success me-2">View Dashboard</a>
-        <a href="/ml-insights" class="btn btn-warning">View ML Insights</a>
+    <div class="mt-4 d-flex flex-wrap gap-2">
+        <a href="{{ url_for('data_pull') }}" class="btn btn-primary">Search household data</a>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-success">View dashboard</a>
+        <a href="{{ url_for('ml_insights') }}" class="btn btn-warning text-dark">View ML insights</a>
+        <a href="{{ url_for('ml_overview') }}" class="btn btn-outline-secondary">ML model write-up</a>
     </div>
 </div>
 
-<div class="row mt-4">
+<div class="row mt-4 g-3">
     <div class="col-md-4">
         <div class="card p-3 shadow-sm h-100">
             <h5>Azure SQL Data Pull</h5>

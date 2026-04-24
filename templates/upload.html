@@ -29,7 +29,11 @@
     <button class="btn btn-success">Upload & Replace Data</button>
 </form>
 
-<div class="alert alert-secondary mt-4">
-    After upload, the Data Pull page can be used to test whether the updated dataset works correctly.
+<div class="alert alert-warning mt-4 mb-0">
+    <strong>Azure SQL:</strong> This form saves CSVs under the app’s <code>data/</code> folder on the server.
+    The live <strong>Data Pull</strong>, <strong>Dashboard</strong>, and <strong>ML Insights</strong> pages read from
+    <strong>Azure SQL</strong>. After uploading new files, run your
+    <code>load_to_azure_sql.py</code> script (or another load process) against the same database so SQL reflects the new files,
+    then verify on <strong>Data Pull</strong>.
 </div>
 {% endblock %}

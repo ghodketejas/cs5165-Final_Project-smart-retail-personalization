@@ -7,6 +7,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from typing import Optional
 
 from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import GradientBoostingClassifier
 
 app = Flask(__name__)
 # Azure App Service: set FLASK_SECRET_KEY in Application settings (or SECRET_KEY).
@@ -233,7 +234,13 @@ def get_merged_for_analytics_from_sql():
             t.SPEND AS spend,
             t.UNITS AS units,
             t.WEEK_NUM AS week_num,
-            p.DEPARTMENT AS department
+            p.DEPARTMENT AS department,
+            t.STORE_R AS store_region,
+            h.HH_SIZE AS hh_size,
+            h.CHILDREN AS children,
+            h.INCOME_RANGE AS income_range,
+            p.BRAND_TY AS brand_ty,
+            p.NATURAL_ORGANIC_FLAG AS natural_organic_flag
         FROM Transactions t
         INNER JOIN Products p ON t.PRODUCT_NUM = p.PRODUCT_NUM
         INNER JOIN Households h ON t.HSHD_NUM = h.HSHD_NUM
@@ -243,6 +250,24 @@ def get_merged_for_analytics_from_sql():
     conn.close()
     df.columns = [str(c).lower() for c in df.columns]
     return df
+
+
+def _spend_by_category_for_chart(
+    df: pd.DataFrame, col: str, *, fill_label: str = "Unknown", top_n: int = 14
+):
+    """Aggregate spend by a categorical column for Chart.js (labels + values)."""
+    if df is None or df.empty or col not in df.columns:
+        return [], []
+    s = df.copy()
+    s[col] = s[col].fillna(fill_label).astype(str).str.strip()
+    s.loc[s[col] == "", col] = fill_label
+    g = (
+        s.groupby(col, as_index=True)["spend"]
+        .sum()
+        .sort_values(ascending=False)
+        .head(top_n)
+    )
+    return [str(i) for i in g.index], [float(x) for x in g.values]
 
 
 DATA_PULL_SORT_KEYS = [
@@ -275,6 +300,12 @@ def _sort_data_pull_results(df, sort_by, ascending):
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/ml-overview")
+def ml_overview():
+    """Short write-up for deliverable: LR, RF, GB, and CLV model choice (public)."""
+    return render_template("ml_overview.html")
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -403,6 +434,14 @@ def dashboard():
                 dept_values=[],
                 week_labels=[],
                 week_values=[],
+                demo_income_labels=[],
+                demo_income_values=[],
+                demo_children_labels=[],
+                demo_children_values=[],
+                brand_ty_labels=[],
+                brand_ty_values=[],
+                organic_labels=[],
+                organic_values=[],
             )
 
         # Total Spend
@@ -432,6 +471,19 @@ def dashboard():
         week_labels = [str(x) for x in spend_time.index]
         week_values = [float(x) for x in spend_time.values]
 
+        demo_income_labels, demo_income_values = _spend_by_category_for_chart(
+            merged, "income_range", top_n=12
+        )
+        demo_children_labels, demo_children_values = _spend_by_category_for_chart(
+            merged, "children", top_n=10
+        )
+        brand_ty_labels, brand_ty_values = _spend_by_category_for_chart(
+            merged, "brand_ty", top_n=14
+        )
+        organic_labels, organic_values = _spend_by_category_for_chart(
+            merged, "natural_organic_flag", top_n=8
+        )
+
         return render_template(
             "dashboard.html",
             total_spend=total_spend,
@@ -440,6 +492,14 @@ def dashboard():
             dept_values=dept_values,
             week_labels=week_labels,
             week_values=week_values,
+            demo_income_labels=demo_income_labels,
+            demo_income_values=demo_income_values,
+            demo_children_labels=demo_children_labels,
+            demo_children_values=demo_children_values,
+            brand_ty_labels=brand_ty_labels,
+            brand_ty_values=brand_ty_values,
+            organic_labels=organic_labels,
+            organic_values=organic_values,
         )
 
     except Exception as e:
@@ -457,6 +517,7 @@ def ml_insights():
                 "ml_insights.html",
                 top_clv=[],
                 basket_results=[],
+                basket_gb_rows=[],
                 high_risk_customers=[],
                 high_risk_count=0,
                 low_risk_count=0,
@@ -531,6 +592,40 @@ def ml_insights():
             for pair in top_pairs
         ]
 
+        # Gradient Boosting on basket-level features (deliverable: ML for basket analysis)
+        basket_gb_rows = []
+        try:
+            bf = merged.groupby("basket_num", as_index=False).agg(
+                n_lines=("commodity", "count"),
+                n_commodity=("commodity", "nunique"),
+                n_department=("department", "nunique"),
+                basket_spend=("spend", "sum"),
+            )
+            if len(bf) >= 40 and bf["basket_spend"].nunique() > 1:
+                med_spend = bf["basket_spend"].median()
+                bf["high_value_basket"] = (bf["basket_spend"] >= med_spend).astype(int)
+                if bf["high_value_basket"].nunique() > 1:
+                    Xb = bf[["n_lines", "n_commodity", "n_department"]]
+                    yb = bf["high_value_basket"]
+                    gb = GradientBoostingClassifier(
+                        max_depth=3,
+                        n_estimators=80,
+                        learning_rate=0.08,
+                        random_state=42,
+                    )
+                    gb.fit(Xb, yb)
+                    labels = [
+                        "Lines in basket",
+                        "Distinct commodities",
+                        "Distinct departments",
+                    ]
+                    for lab, imp in zip(labels, gb.feature_importances_):
+                        basket_gb_rows.append(
+                            {"feature": lab, "importance_pct": round(float(imp) * 100, 2)}
+                        )
+        except Exception:
+            basket_gb_rows = []
+
         # -----------------------------
         # 3. Churn Risk
         # -----------------------------
@@ -562,9 +657,10 @@ def ml_insights():
             "ml_insights.html",
             top_clv=top_clv.to_dict(orient="records"),
             basket_results=basket_results,
+            basket_gb_rows=basket_gb_rows,
             high_risk_customers=high_risk_customers.to_dict(orient="records"),
             high_risk_count=high_risk_count,
-            low_risk_count=low_risk_count
+            low_risk_count=low_risk_count,
         )
 
     except Exception as e:

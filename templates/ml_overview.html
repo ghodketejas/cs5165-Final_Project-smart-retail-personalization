@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-hero mb-4">
+    <h1 class="h3 fw-bold mb-3">ML models (course write-up)</h1>
+    <p class="text-muted small mb-0">Under 200 words · Customer Lifetime Value (CLV) focus</p>
+</div>
+
+<div class="card border-0 shadow-sm p-4 mb-4">
+    <p class="mb-3">
+        <strong>Linear Regression</strong> models a numeric target as a weighted sum of features. It trains quickly,
+        stays easy to explain to stakeholders, and works well when relationships are roughly smooth and you want
+        coefficients that read like business levers.
+    </p>
+    <p class="mb-3">
+        <strong>Random Forest</strong> averages predictions from many decision trees trained on bootstrap samples
+        and random feature subsets. It captures nonlinear patterns and interactions with less hand tuning than a single tree,
+        though full interpretability often relies on importance scores or partial dependence plots.
+    </p>
+    <p class="mb-3">
+        <strong>Gradient Boosting</strong> adds trees sequentially so each new tree reduces the residual error of the ensemble.
+        It frequently delivers strong accuracy on tabular retail data but needs more care with depth, learning rate, and
+        stopping to avoid overfitting on smaller samples.
+    </p>
+    <p class="mb-0">
+        <strong>CLV choice for this project:</strong> We use <strong>Linear Regression</strong> for Customer Lifetime Value
+        because CLV is introduced as a smooth function of interpretable household metrics (spend, baskets, units, active weeks),
+        which supports transparent prioritization of high-value customers. Random Forest or Gradient Boosting would be natural
+        upgrades if we needed sharper segment boundaries or richer interaction effects at the cost of more opaque models.
+    </p>
+</div>
+
+<p class="small text-muted">
+    <a href="{{ url_for('ml_insights') }}">Back to ML Insights</a>
+    (sign in required)
+</p>
+{% endblock %}

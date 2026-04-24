@@ -1,14 +1,16 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2>Machine Learning Insights</h2>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h2 class="mb-0">Machine Learning Insights</h2>
+    <a href="{{ url_for('ml_overview') }}" class="btn btn-outline-secondary btn-sm">ML model write-up</a>
+</div>
 
-<p>
-    This page uses retail transaction data to estimate Customer Lifetime Value,
-    identify common product combinations, and detect households at risk of churn.
+<p class="lead text-muted">
+    Retail transaction data powers CLV estimation, basket intelligence, and churn-style recency signals.
 </p>
 
-<hr>
+<hr class="opacity-25">
 
 <h3>1. Customer Lifetime Value Prediction</h3>
 
@@ -62,11 +64,33 @@
 </p>
 
 <div class="card p-3 mb-3 shadow-sm">
-    <h5>Model / Technique Details</h5>
-    <p><strong>Technique:</strong> Basket Pair Frequency Analysis</p>
-    <p><strong>Goal:</strong> Find commonly purchased category combinations.</p>
-    <p><strong>Retail Use:</strong> Recommend related products and create bundle promotions.</p>
+    <h5>Model / technique details</h5>
+    <p><strong>Association view:</strong> Basket pair frequency (which commodities appear together).</p>
+    <p><strong>ML view (deliverable):</strong> <strong>Gradient Boosting</strong> classifier on basket-level features to explain
+        which structural signals align with <em>above-median basket spend</em> (cross-sell / upsell opportunity baskets).</p>
+    <p class="mb-0"><strong>Retail use:</strong> Pair lists drive bundles; GB importances highlight basket “shape” worth targeting.</p>
 </div>
+
+{% if basket_gb_rows %}
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white py-3">
+        <h5 class="mb-0">Gradient Boosting — basket feature importance</h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-striped table-bordered mb-0">
+                <tr><th>Feature</th><th>Importance (% of model)</th></tr>
+                {% for row in basket_gb_rows %}
+                <tr>
+                    <td>{{ row.feature }}</td>
+                    <td>{{ row.importance_pct }}%</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
 
 <div class="table-responsive mb-4">
 <table class="table table-striped table-bordered">
@@ -107,18 +131,29 @@
     <p><strong>Retail Use:</strong> Identify households that may need retention offers.</p>
 </div>
 
-<div class="row mb-4">
-    <div class="col-md-6">
-        <div class="card p-3 shadow-sm">
-            <h5>High Risk Customers</h5>
-            <h3>{{ high_risk_count }}</h3>
+<div class="row mb-4 align-items-stretch">
+    <div class="col-md-4 mb-3 mb-md-0">
+        <div class="card p-3 shadow-sm h-100">
+            <h5 class="text-danger">High risk households</h5>
+            <h3 class="mb-0">{{ high_risk_count }}</h3>
+            <p class="text-muted small mb-0 mt-2">No purchase in 8+ weeks (dataset window).</p>
         </div>
     </div>
 
-    <div class="col-md-6">
-        <div class="card p-3 shadow-sm">
-            <h5>Low Risk Customers</h5>
-            <h3>{{ low_risk_count }}</h3>
+    <div class="col-md-4 mb-3 mb-md-0">
+        <div class="card p-3 shadow-sm h-100">
+            <h5 class="text-success">Low risk households</h5>
+            <h3 class="mb-0">{{ low_risk_count }}</h3>
+            <p class="text-muted small mb-0 mt-2">More recent purchase activity.</p>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card p-3 shadow-sm h-100">
+            <h5 class="mb-3">Churn mix (graphical)</h5>
+            <div style="max-height: 220px;">
+                <canvas id="churnChart"></canvas>
+            </div>
         </div>
     </div>
 </div>
@@ -152,4 +187,27 @@
     loyalty incentives, or reminder campaigns.
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const hi = {{ high_risk_count|int }};
+    const lo = {{ low_risk_count|int }};
+    const ctx = document.getElementById('churnChart');
+    if (ctx && (hi + lo) > 0) {
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['High risk', 'Low risk'],
+                datasets: [{
+                    data: [hi, lo],
+                    backgroundColor: ['#dc3545', '#198754'],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                plugins: { legend: { position: 'bottom' } },
+                maintainAspectRatio: true
+            }
+        });
+    }
+</script>
 {% endblock %}
