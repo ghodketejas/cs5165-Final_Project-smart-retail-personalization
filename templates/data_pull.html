@@ -8,17 +8,46 @@
     Default sample household is <strong>HSHD_NUM #10</strong>.
 </p>
 
-<form method="POST" class="mb-4">
-    <label>Enter Household Number:</label>
-    <input type="number" name="hshd_num" value="{{ household_id }}" class="form-control mb-2" required>
-    <button class="btn btn-primary">Search</button>
+<form method="GET" action="{{ url_for('data_pull') }}" class="mb-4">
+    <label class="form-label" for="hshd_num">Enter Household Number:</label>
+    <input type="number" id="hshd_num" name="hshd_num" value="{{ household_id }}" class="form-control mb-2" required>
+
+    <div class="row g-2 mb-2">
+        <div class="col-md-6">
+            <label class="form-label" for="sort_by">Sort by</label>
+            <select id="sort_by" name="sort_by" class="form-select">
+                <option value="hshd_num" {{ 'selected' if sort_by == 'hshd_num' else '' }}>Hshd num</option>
+                <option value="basket_num" {{ 'selected' if sort_by == 'basket_num' else '' }}>Basket num</option>
+                <option value="date" {{ 'selected' if sort_by == 'date' else '' }}>Date</option>
+                <option value="product_num" {{ 'selected' if sort_by == 'product_num' else '' }}>Product num</option>
+                <option value="department" {{ 'selected' if sort_by == 'department' else '' }}>Department</option>
+                <option value="commodity" {{ 'selected' if sort_by == 'commodity' else '' }}>Commodity</option>
+            </select>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="sort_dir">Order</label>
+            <select id="sort_dir" name="sort_dir" class="form-select">
+                <option value="asc" {{ 'selected' if sort_dir == 'asc' else '' }}>Ascending</option>
+                <option value="desc" {{ 'selected' if sort_dir == 'desc' else '' }}>Descending</option>
+            </select>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Search</button>
 </form>
 
 <h4>Results for Household #{{ household_id }}</h4>
 
-<p><strong>Showing first 100 records (sorted)</strong></p>
+<p><strong>Showing first 100 records</strong> (ordered by <strong>{{ sort_by }}</strong>, {{ sort_dir }})</p>
 
+{% if no_results %}
+<div class="alert alert-warning">
+    No transactions found for Household #{{ household_id }}.
+    Try IDs like 10, 60, 991, 1241, or 2512.
+</div>
+{% else %}
 <div class="table-responsive">
     {{ tables|safe }}
 </div>
+{% endif %}
 {% endblock %}

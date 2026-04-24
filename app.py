@@ -75,6 +75,33 @@ def get_data_pull_from_sql(household_id):
     return df
 
 
+DATA_PULL_SORT_KEYS = [
+    "hshd_num",
+    "basket_num",
+    "date",
+    "product_num",
+    "department",
+    "commodity",
+]
+
+
+def _sort_data_pull_results(df, sort_by, ascending):
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    df.columns = [str(c).lower() for c in df.columns]
+    key = sort_by if sort_by in DATA_PULL_SORT_KEYS else "hshd_num"
+    if key == "date" and key in df.columns:
+        col = pd.to_datetime(df["date"], errors="coerce")
+        df = df.assign(_sort_date=col).sort_values(
+            by="_sort_date", ascending=ascending, na_position="last"
+        )
+        return df.drop(columns=["_sort_date"])
+    if key in df.columns:
+        return df.sort_values(by=key, ascending=ascending, na_position="last")
+    return df
+
+
 def clean_columns(df):
     df.columns = df.columns.str.strip()
     df.columns = df.columns.str.lower()
@@ -119,22 +146,32 @@ def login():
 
 @app.route("/data-pull", methods=["GET", "POST"])
 def data_pull():
-    household_id = 10
-
-    if request.method == "POST":
-        household_id = request.form.get("hshd_num", 10)
+    household_id = request.values.get("hshd_num", 10)
+    sort_by = request.values.get("sort_by", "hshd_num")
+    sort_dir = request.values.get("sort_dir", "asc")
+    if sort_by not in DATA_PULL_SORT_KEYS:
+        sort_by = "hshd_num"
+    if sort_dir not in ("asc", "desc"):
+        sort_dir = "asc"
+    ascending = sort_dir == "asc"
 
     try:
         results = get_data_pull_from_sql(household_id)
+        results = _sort_data_pull_results(results, sort_by, ascending)
 
     except Exception as e:
         flash(f"Azure SQL error: {e}")
         results = pd.DataFrame()
 
+    no_results = results.empty
+
     return render_template(
         "data_pull.html",
         household_id=household_id,
-        tables=results.to_html(classes="table table-striped table-bordered", index=False)
+        tables=results.to_html(classes="table table-striped table-bordered", index=False) if not no_results else "",
+        no_results=no_results,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
     )
 
 
