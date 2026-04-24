@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, flash
 import pandas as pd
 import os
+import pyodbc
 from sklearn.linear_model import LinearRegression
 
 app = Flask(__name__)
@@ -11,6 +12,67 @@ DATA_FOLDER = "data"
 HOUSEHOLDS_FILE = os.path.join(DATA_FOLDER, "400_households.csv")
 TRANSACTIONS_FILE = os.path.join(DATA_FOLDER, "400_transactions.csv")
 PRODUCTS_FILE = os.path.join(DATA_FOLDER, "400_products.csv")
+
+SQL_SERVER = os.getenv("AZURE_SQL_SERVER")
+SQL_DATABASE = os.getenv("AZURE_SQL_DATABASE")
+SQL_USERNAME = os.getenv("AZURE_SQL_USERNAME")
+SQL_PASSWORD = os.getenv("AZURE_SQL_PASSWORD")
+
+
+def get_sql_connection():
+    conn_str = (
+        "DRIVER={ODBC Driver 17 for SQL Server};"
+        f"SERVER={SQL_SERVER};"
+        f"DATABASE={SQL_DATABASE};"
+        f"UID={SQL_USERNAME};"
+        f"PWD={SQL_PASSWORD};"
+        "Encrypt=yes;"
+        "TrustServerCertificate=no;"
+        "Connection Timeout=60;"
+    )
+    return pyodbc.connect(conn_str)
+
+
+def get_data_pull_from_sql(household_id):
+    query = """
+        SELECT TOP 100
+            t.HSHD_NUM AS hshd_num,
+            t.BASKET_NUM AS basket_num,
+            t.PURCHASE_DATE AS date,
+            t.PRODUCT_NUM AS product_num,
+            p.DEPARTMENT AS department,
+            p.COMMODITY AS commodity,
+            t.SPEND AS spend,
+            t.UNITS AS units,
+            t.STORE_R AS store_region,
+            t.WEEK_NUM AS week_num,
+            t.YEAR AS year,
+            h.LOYALTY_FLAG AS loyalty_flag,
+            h.AGE_RANGE AS age_range,
+            h.MARITAL_STATUS AS marital_status,
+            h.INCOME_RANGE AS income_range,
+            h.HOMEOWNER_DESC AS homeowner_desc,
+            h.HSHD_COMPOSITION AS hshd_composition,
+            h.HH_SIZE AS hshd_size,
+            h.CHILDREN AS children
+        FROM Transactions t
+        JOIN Households h ON t.HSHD_NUM = h.HSHD_NUM
+        JOIN Products p ON t.PRODUCT_NUM = p.PRODUCT_NUM
+        WHERE t.HSHD_NUM = ?
+        ORDER BY
+            t.HSHD_NUM,
+            t.BASKET_NUM,
+            t.PURCHASE_DATE,
+            t.PRODUCT_NUM,
+            p.DEPARTMENT,
+            p.COMMODITY;
+    """
+
+    conn = get_sql_connection()
+    df = pd.read_sql(query, conn, params=[int(household_id)])
+    conn.close()
+
+    return df
 
 
 def clean_columns(df):
@@ -58,46 +120,15 @@ def login():
 @app.route("/data-pull", methods=["GET", "POST"])
 def data_pull():
     household_id = 10
-    results = None
 
     if request.method == "POST":
         household_id = request.form.get("hshd_num", 10)
 
     try:
-        households, transactions, products, merged = load_data()
-
-        results = merged[merged["hshd_num"].astype(str) == str(household_id)]
-
-        sort_cols = ["hshd_num", "basket_num", "purchase_", "product_num", "department", "commodity"]
-        existing_sort_cols = [col for col in sort_cols if col in results.columns]
-
-        if existing_sort_cols:
-            results = results.sort_values(by=existing_sort_cols)
-
-        display_cols = [
-            "hshd_num", "basket_num", "purchase_", "product_num",
-            "department", "commodity", "spend", "units",
-            "store_r", "week_num", "year", "l",
-            "age_range", "marital", "income_range",
-            "homeowner", "hshd_composition", "hh_size", "children",
-        ]
-
-        existing_display_cols = [col for col in display_cols if col in results.columns]
-        results = results[existing_display_cols].head(100)
-
-        rename_cols = {
-            "purchase_": "date",
-            "l": "loyalty_flag",
-            "store_r": "store_region",
-            "marital": "marital_status",
-            "homeowner": "homeowner_desc",
-            "hh_size": "hshd_size",
-        }
-
-        results = results.rename(columns=rename_cols)
+        results = get_data_pull_from_sql(household_id)
 
     except Exception as e:
-        flash(f"Error loading data: {e}")
+        flash(f"Azure SQL error: {e}")
         results = pd.DataFrame()
 
     return render_template(
