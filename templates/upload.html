@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Upload Latest Dataset</h2>
+
+<form method="POST" enctype="multipart/form-data" class="card p-4">
+
+    <label>Households CSV</label>
+    <input type="file" name="households" class="form-control mb-3" required>
+
+    <label>Transactions CSV</label>
+    <input type="file" name="transactions" class="form-control mb-3" required>
+
+    <label>Products CSV</label>
+    <input type="file" name="products" class="form-control mb-3" required>
+
+    <button class="btn btn-success">Upload & Replace Data</button>
+
+</form>
+{% endblock %}

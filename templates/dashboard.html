@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>Retail KPI Dashboard</h2>
+
+<div class="row mb-4">
+
+    <div class="col-md-6">
+        <div class="card p-3">
+            <h5>Total Spend</h5>
+            <h3>${{ total_spend }}</h3>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card p-3">
+            <h5>Total Transactions</h5>
+            <h3>{{ total_transactions }}</h3>
+        </div>
+    </div>
+
+</div>
+
+<div class="row">
+
+    <div class="col-md-6">
+        <div class="card p-3">
+            <h5>Top Departments</h5>
+            <canvas id="deptChart"></canvas>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card p-3">
+            <h5>Spend Over Time</h5>
+            <canvas id="timeChart"></canvas>
+        </div>
+    </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+    const deptChart = new Chart(document.getElementById('deptChart'), {
+        type: 'bar',
+        data: {
+            labels: {{ dept_labels|tojson }},
+            datasets: [{
+                label: 'Spend',
+                data: {{ dept_values|tojson }}
+            }]
+        }
+    });
+
+    const timeChart = new Chart(document.getElementById('timeChart'), {
+        type: 'line',
+        data: {
+            labels: {{ week_labels|tojson }},
+            datasets: [{
+                label: 'Spend',
+                data: {{ week_values|tojson }}
+            }]
+        }
+    });
+</script>
+
+{% endblock %}

@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>Machine Learning Insights</h2>
+
+<p>
+    This page uses retail transaction data to estimate Customer Lifetime Value,
+    identify common product combinations, and detect households at risk of churn.
+</p>
+
+<hr>
+
+<h3>1. Customer Lifetime Value Prediction</h3>
+
+<p>
+    CLV is predicted using a Linear Regression model trained on household spending behavior,
+    including total spend, total units, total baskets, active weeks, and average basket value.
+    Higher predicted CLV indicates households that may generate more long-term revenue.
+</p>
+
+<div class="card p-3 mb-3">
+    <h5>Model Details</h5>
+    <p><strong>Model Used:</strong> Linear Regression</p>
+    <p><strong>Features:</strong> Total Spend, Total Units, Total Baskets, Active Weeks, Average Basket Value</p>
+    <p><strong>Target:</strong> Estimated Future Customer Lifetime Value</p>
+</div>
+
+<table class="table table-striped table-bordered">
+    <tr>
+        <th>Household Number</th>
+        <th>Total Spend</th>
+        <th>Total Baskets</th>
+        <th>Average Basket Value</th>
+        <th>Predicted CLV</th>
+    </tr>
+
+    {% for row in top_clv %}
+    <tr>
+        <td>{{ row.hshd_num }}</td>
+        <td>${{ "%.2f"|format(row.total_spend) }}</td>
+        <td>{{ row.total_baskets }}</td>
+        <td>${{ "%.2f"|format(row.avg_basket_value) }}</td>
+        <td>${{ "%.2f"|format(row.predicted_clv) }}</td>
+    </tr>
+    {% endfor %}
+</table>
+
+<hr>
+
+<h3>2. Basket Analysis / Cross-Selling</h3>
+
+<p>
+    This analysis finds product categories that are commonly purchased together.
+    These combinations can support cross-selling and bundle recommendations.
+</p>
+
+<table class="table table-striped table-bordered">
+    <tr>
+        <th>Item 1</th>
+        <th>Item 2</th>
+        <th>Times Bought Together</th>
+    </tr>
+
+    {% for row in basket_results %}
+    <tr>
+        <td>{{ row.item_1 }}</td>
+        <td>{{ row.item_2 }}</td>
+        <td>{{ row.times_bought_together }}</td>
+    </tr>
+    {% endfor %}
+</table>
+
+<hr>
+
+<h3>3. Churn Prediction</h3>
+
+<p>
+    A household is marked as high risk if it has not purchased anything in the
+    last 8 or more weeks of the dataset.
+</p>
+
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card p-3">
+            <h5>High Risk Customers</h5>
+            <h3>{{ high_risk_count }}</h3>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card p-3">
+            <h5>Low Risk Customers</h5>
+            <h3>{{ low_risk_count }}</h3>
+        </div>
+    </div>
+</div>
+
+<table class="table table-striped table-bordered">
+    <tr>
+        <th>Household Number</th>
+        <th>Last Purchase Week</th>
+        <th>Weeks Since Last Purchase</th>
+        <th>Total Spend</th>
+        <th>Total Baskets</th>
+        <th>Churn Risk</th>
+    </tr>
+
+    {% for row in high_risk_customers %}
+    <tr>
+        <td>{{ row.hshd_num }}</td>
+        <td>{{ row.last_purchase_week }}</td>
+        <td>{{ row.weeks_since_last_purchase }}</td>
+        <td>${{ "%.2f"|format(row.total_spend) }}</td>
+        <td>{{ row.total_baskets }}</td>
+        <td>{{ row.churn_risk }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endblock %}

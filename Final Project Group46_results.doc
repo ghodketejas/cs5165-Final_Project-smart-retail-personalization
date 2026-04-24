@@ -1,0 +1,7 @@
+Linear Regression is a supervised machine learning algorithm used to model the relationship between a dependent variable and one or more independent variables. It assumes a linear relationship and is simple, fast, and easy to interpret, making it useful for predicting continuous values such as revenue or customer lifetime value (CLV).
+
+Random Forest is an ensemble learning method that builds multiple decision trees and combines their predictions. It reduces overfitting and improves accuracy by averaging results from many trees. It is effective for both classification and regression problems and can handle complex, non-linear relationships in data.
+
+Gradient Boosting is another ensemble technique that builds models sequentially, where each new model corrects the errors of the previous one. It is highly accurate and powerful for predictive tasks but can be computationally expensive and requires careful tuning.
+
+For this project, Linear Regression was selected to predict Customer Lifetime Value (CLV). It was chosen because of its simplicity, interpretability, and ability to provide quick insights into how customer behavior metrics such as spending and purchase frequency influence long-term value.

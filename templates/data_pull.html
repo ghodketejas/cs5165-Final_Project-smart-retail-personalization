@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Sample Data Pull</h2>
+
+<p>
+    This page links the Households, Transactions, and Products tables.
+    Default sample household is <strong>HSHD_NUM #10</strong>.
+</p>
+
+<form method="POST" class="mb-4">
+    <label>Enter Household Number:</label>
+    <input type="number" name="hshd_num" value="{{ household_id }}" class="form-control mb-2" required>
+    <button class="btn btn-primary">Search</button>
+</form>
+
+<h4>Results for Household #{{ household_id }}</h4>
+
+<p><strong>Showing first 100 records (sorted)</strong></p>
+
+<div class="table-responsive">
+    {{ tables|safe }}
+</div>
+{% endblock %}
