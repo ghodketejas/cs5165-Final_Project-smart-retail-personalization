@@ -62,6 +62,11 @@
     Basket analysis identifies product categories that are commonly purchased together.
     These combinations can support cross-selling, bundle design, and personalized recommendations.
 </p>
+<p class="small text-muted">
+    For large databases, the <strong>pair-frequency</strong> table uses a capped sample of transaction lines
+    (same joins as production data) so the page stays responsive; rankings are representative but not exhaustive.
+    Gradient Boosting uses <strong>SQL-aggregated basket metrics</strong> (one row per basket).
+</p>
 
 <div class="card p-3 mb-3 shadow-sm">
     <h5>Model / technique details</h5>

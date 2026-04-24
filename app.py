@@ -1,8 +1,10 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 import pandas as pd
 import os
+import urllib.parse
 import pyodbc
 from functools import wraps
+from sqlalchemy import create_engine, text
 from werkzeug.security import check_password_hash, generate_password_hash
 from typing import Optional
 
@@ -179,6 +181,36 @@ def get_sql_connection():
     return pyodbc.connect(conn_str)
 
 
+_sqlalchemy_engine = None
+
+
+def get_sqlalchemy_engine():
+    """
+    SQLAlchemy engine for pandas read_sql (avoids UserWarning about raw pyodbc).
+    pyodbc is still used for auth helpers that need a raw DBAPI cursor.
+    """
+    global _sqlalchemy_engine
+    if _sqlalchemy_engine is not None:
+        return _sqlalchemy_engine
+    _require_sql_settings()
+    server = str(SQL_SERVER).strip()
+    database = str(SQL_DATABASE).strip()
+    username = str(SQL_USERNAME).strip()
+    password = str(SQL_PASSWORD)
+    odbc_str = (
+        "DRIVER={ODBC Driver 17 for SQL Server};"
+        f"SERVER={server};DATABASE={database};UID={username};PWD={password};"
+        "Encrypt=yes;TrustServerCertificate=no;Connection Timeout=120;"
+    )
+    encoded = urllib.parse.quote_plus(odbc_str)
+    _sqlalchemy_engine = create_engine(
+        f"mssql+pyodbc:///?odbc_connect={encoded}",
+        pool_pre_ping=True,
+        pool_recycle=3600,
+    )
+    return _sqlalchemy_engine
+
+
 def get_data_pull_from_sql(household_id):
     query = """
         SELECT TOP 100
@@ -204,7 +236,7 @@ def get_data_pull_from_sql(household_id):
         FROM Transactions t
         JOIN Households h ON t.HSHD_NUM = h.HSHD_NUM
         JOIN Products p ON t.PRODUCT_NUM = p.PRODUCT_NUM
-        WHERE t.HSHD_NUM = ?
+        WHERE t.HSHD_NUM = :hid
         ORDER BY
             t.HSHD_NUM,
             t.BASKET_NUM,
@@ -214,60 +246,241 @@ def get_data_pull_from_sql(household_id):
             p.COMMODITY;
     """
 
-    conn = get_sql_connection()
-    df = pd.read_sql(query, conn, params=[int(household_id)])
-    conn.close()
-
-    return df
-
-
-def get_merged_for_analytics_from_sql():
-    """
-    Full joined line-level data from Azure SQL, equivalent to the old
-    transactions + households + products merge used by Dashboard and ML Insights.
-    """
-    query = """
-        SELECT
-            t.HSHD_NUM AS hshd_num,
-            t.BASKET_NUM AS basket_num,
-            p.COMMODITY AS commodity,
-            t.SPEND AS spend,
-            t.UNITS AS units,
-            t.WEEK_NUM AS week_num,
-            p.DEPARTMENT AS department,
-            t.STORE_R AS store_region,
-            h.HH_SIZE AS hh_size,
-            h.CHILDREN AS children,
-            h.INCOME_RANGE AS income_range,
-            p.BRAND_TY AS brand_ty,
-            p.NATURAL_ORGANIC_FLAG AS natural_organic_flag
-        FROM Transactions t
-        INNER JOIN Products p ON t.PRODUCT_NUM = p.PRODUCT_NUM
-        INNER JOIN Households h ON t.HSHD_NUM = h.HSHD_NUM
-    """
-    conn = get_sql_connection()
-    df = pd.read_sql(query, conn)
-    conn.close()
+    engine = get_sqlalchemy_engine()
+    df = pd.read_sql(text(query), engine, params={"hid": int(household_id)})
     df.columns = [str(c).lower() for c in df.columns]
     return df
 
 
-def _spend_by_category_for_chart(
-    df: pd.DataFrame, col: str, *, fill_label: str = "Unknown", top_n: int = 14
-):
-    """Aggregate spend by a categorical column for Chart.js (labels + values)."""
-    if df is None or df.empty or col not in df.columns:
-        return [], []
-    s = df.copy()
-    s[col] = s[col].fillna(fill_label).astype(str).str.strip()
-    s.loc[s[col] == "", col] = fill_label
-    g = (
-        s.groupby(col, as_index=True)["spend"]
-        .sum()
-        .sort_values(ascending=False)
-        .head(top_n)
+# Join used for analytics aggregates (same inner-join semantics as prior full merge).
+_SQL_ANALYTICS_JOIN = """
+FROM Transactions t
+INNER JOIN Products p ON t.PRODUCT_NUM = p.PRODUCT_NUM
+INNER JOIN Households h ON t.HSHD_NUM = h.HSHD_NUM
+"""
+
+# Basket pair co-occurrence is O(lines × basket width); cap lines transferred from SQL.
+_PAIR_SAMPLE_LINE_LIMIT = 250_000
+
+# If basket-level aggregate row count is huge, subsample for Gradient Boosting fit time.
+_ML_GB_MAX_BASKETS = 80_000
+
+
+def _read_sql_lower(engine, sql: str, params=None) -> pd.DataFrame:
+    df = pd.read_sql(text(sql), engine, params=params or {})
+    if not df.empty:
+        df.columns = [str(c).lower() for c in df.columns]
+    return df
+
+
+def fetch_dashboard_metrics_from_sql():
+    """
+    Dashboard KPIs and chart series using SQL GROUP BY (no full fact-table load into pandas).
+    """
+    engine = get_sqlalchemy_engine()
+    total = _read_sql_lower(
+        engine,
+        f"SELECT ISNULL(SUM(CAST(t.SPEND AS FLOAT)), 0) AS v {_SQL_ANALYTICS_JOIN}",
     )
-    return [str(i) for i in g.index], [float(x) for x in g.values]
+    total_spend = float(total["v"].iloc[0]) if not total.empty else 0.0
+
+    nb = _read_sql_lower(
+        engine,
+        f"SELECT COUNT(DISTINCT t.BASKET_NUM) AS v {_SQL_ANALYTICS_JOIN}",
+    )
+    total_transactions = int(nb["v"].iloc[0]) if not nb.empty else 0
+
+    dept_df = _read_sql_lower(
+        engine,
+        f"""
+            SELECT TOP 5 p.DEPARTMENT AS department, SUM(CAST(t.SPEND AS FLOAT)) AS spend
+            {_SQL_ANALYTICS_JOIN}
+            GROUP BY p.DEPARTMENT
+            ORDER BY SUM(t.SPEND) DESC
+            """,
+    )
+    week_df = _read_sql_lower(
+        engine,
+        f"""
+            SELECT t.WEEK_NUM AS week_num, SUM(CAST(t.SPEND AS FLOAT)) AS spend
+            {_SQL_ANALYTICS_JOIN}
+            GROUP BY t.WEEK_NUM
+            ORDER BY t.WEEK_NUM
+            """,
+    )
+    income_df = _read_sql_lower(
+        engine,
+        f"""
+            SELECT TOP 12
+                COALESCE(NULLIF(LTRIM(RTRIM(CAST(h.INCOME_RANGE AS NVARCHAR(256)))), ''), N'Unknown') AS cat,
+                SUM(CAST(t.SPEND AS FLOAT)) AS spend
+            {_SQL_ANALYTICS_JOIN}
+            GROUP BY COALESCE(NULLIF(LTRIM(RTRIM(CAST(h.INCOME_RANGE AS NVARCHAR(256)))), ''), N'Unknown')
+            ORDER BY SUM(t.SPEND) DESC
+            """,
+    )
+    children_df = _read_sql_lower(
+        engine,
+        f"""
+            SELECT TOP 10
+                COALESCE(NULLIF(LTRIM(RTRIM(CAST(h.CHILDREN AS NVARCHAR(128)))), ''), N'Unknown') AS cat,
+                SUM(CAST(t.SPEND AS FLOAT)) AS spend
+            {_SQL_ANALYTICS_JOIN}
+            GROUP BY COALESCE(NULLIF(LTRIM(RTRIM(CAST(h.CHILDREN AS NVARCHAR(128)))), ''), N'Unknown')
+            ORDER BY SUM(t.SPEND) DESC
+            """,
+    )
+    brand_df = _read_sql_lower(
+        engine,
+        f"""
+            SELECT TOP 14
+                COALESCE(NULLIF(LTRIM(RTRIM(CAST(p.BRAND_TY AS NVARCHAR(128)))), ''), N'Unknown') AS cat,
+                SUM(CAST(t.SPEND AS FLOAT)) AS spend
+            {_SQL_ANALYTICS_JOIN}
+            GROUP BY COALESCE(NULLIF(LTRIM(RTRIM(CAST(p.BRAND_TY AS NVARCHAR(128)))), ''), N'Unknown')
+            ORDER BY SUM(t.SPEND) DESC
+            """,
+    )
+    organic_df = _read_sql_lower(
+        engine,
+        f"""
+            SELECT TOP 8
+                COALESCE(NULLIF(LTRIM(RTRIM(CAST(p.NATURAL_ORGANIC_FLAG AS NVARCHAR(128)))), ''), N'Unknown') AS cat,
+                SUM(CAST(t.SPEND AS FLOAT)) AS spend
+            {_SQL_ANALYTICS_JOIN}
+            GROUP BY COALESCE(NULLIF(LTRIM(RTRIM(CAST(p.NATURAL_ORGANIC_FLAG AS NVARCHAR(128)))), ''), N'Unknown')
+            ORDER BY SUM(t.SPEND) DESC
+            """,
+    )
+
+    def _lv(df, c_cat="cat", c_spend="spend"):
+        if df is None or df.empty:
+            return [], []
+        return [str(x) for x in df[c_cat]], [float(x) for x in df[c_spend]]
+
+    dept_labels, dept_values = _lv(dept_df, "department", "spend")
+    week_labels, week_values = _lv(week_df, "week_num", "spend")
+    demo_income_labels, demo_income_values = _lv(income_df)
+    demo_children_labels, demo_children_values = _lv(children_df)
+    brand_ty_labels, brand_ty_values = _lv(brand_df)
+    organic_labels, organic_values = _lv(organic_df)
+
+    return {
+        "total_spend": f"{total_spend:,.2f}",
+        "total_transactions": total_transactions,
+        "dept_labels": dept_labels,
+        "dept_values": dept_values,
+        "week_labels": week_labels,
+        "week_values": week_values,
+        "demo_income_labels": demo_income_labels,
+        "demo_income_values": demo_income_values,
+        "demo_children_labels": demo_children_labels,
+        "demo_children_values": demo_children_values,
+        "brand_ty_labels": brand_ty_labels,
+        "brand_ty_values": brand_ty_values,
+        "organic_labels": organic_labels,
+        "organic_values": organic_values,
+        "has_data": total_transactions > 0 or total_spend > 0,
+    }
+
+
+def _basket_pair_results_from_sample(lines_df: pd.DataFrame):
+    """Build top commodity pair list from basket_num + commodity lines (possibly sampled)."""
+    if lines_df is None or lines_df.empty:
+        return []
+    lines_df = lines_df.copy()
+    lines_df.columns = [str(c).lower() for c in lines_df.columns]
+    basket_pairs = (
+        lines_df.groupby(["basket_num", "commodity"]).size().reset_index(name="count")
+    )
+    basket_items = basket_pairs.groupby("basket_num")["commodity"].apply(list)
+    pair_counts = {}
+    for items in basket_items:
+        unique_items = list(set(items))
+        for i in range(len(unique_items)):
+            for j in range(i + 1, len(unique_items)):
+                pair = tuple(sorted([unique_items[i], unique_items[j]]))
+                pair_counts[pair] = pair_counts.get(pair, 0) + 1
+    top_pairs = sorted(pair_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    return [
+        {"item_1": pair[0][0], "item_2": pair[0][1], "times_bought_together": pair[1]}
+        for pair in top_pairs
+    ]
+
+
+def fetch_ml_insights_from_sql():
+    """
+    ML Insights using SQL aggregates + a capped line sample for pair mining.
+    Avoids loading the full joined transaction fact table into memory.
+    """
+    engine = get_sqlalchemy_engine()
+    max_w = _read_sql_lower(
+        engine,
+        f"SELECT MAX(t.WEEK_NUM) AS max_week {_SQL_ANALYTICS_JOIN}",
+    )
+    if max_w.empty or pd.isna(max_w["max_week"].iloc[0]):
+        return None
+    latest_week = float(max_w["max_week"].iloc[0])
+
+    customer_summary = _read_sql_lower(
+        engine,
+        f"""
+            SELECT
+                t.HSHD_NUM AS hshd_num,
+                SUM(CAST(t.SPEND AS FLOAT)) AS total_spend,
+                SUM(CAST(t.UNITS AS FLOAT)) AS total_units,
+                COUNT(DISTINCT t.BASKET_NUM) AS total_baskets,
+                COUNT(DISTINCT t.WEEK_NUM) AS active_weeks
+            {_SQL_ANALYTICS_JOIN}
+            GROUP BY t.HSHD_NUM
+            """,
+    )
+    if customer_summary.empty:
+        return None
+
+    basket_agg = _read_sql_lower(
+        engine,
+        f"""
+            SELECT
+                t.BASKET_NUM AS basket_num,
+                COUNT_BIG(*) AS n_lines,
+                COUNT(DISTINCT p.COMMODITY) AS n_commodity,
+                COUNT(DISTINCT p.DEPARTMENT) AS n_department,
+                SUM(CAST(t.SPEND AS FLOAT)) AS basket_spend
+            {_SQL_ANALYTICS_JOIN}
+            GROUP BY t.BASKET_NUM
+            """,
+    )
+
+    churn_data = _read_sql_lower(
+        engine,
+        f"""
+            SELECT
+                t.HSHD_NUM AS hshd_num,
+                MAX(t.WEEK_NUM) AS last_purchase_week,
+                SUM(CAST(t.SPEND AS FLOAT)) AS total_spend,
+                COUNT(DISTINCT t.BASKET_NUM) AS total_baskets
+            {_SQL_ANALYTICS_JOIN}
+            GROUP BY t.HSHD_NUM
+            """,
+    )
+
+    pair_lines = _read_sql_lower(
+        engine,
+        f"""
+            SELECT TOP ({_PAIR_SAMPLE_LINE_LIMIT}) t.BASKET_NUM AS basket_num, p.COMMODITY AS commodity
+            {_SQL_ANALYTICS_JOIN}
+            ORDER BY t.BASKET_NUM, t.PRODUCT_NUM
+            """,
+    )
+
+    return {
+        "latest_week": latest_week,
+        "customer_summary": customer_summary,
+        "basket_agg": basket_agg,
+        "churn_data": churn_data,
+        "pair_lines": pair_lines,
+    }
 
 
 DATA_PULL_SORT_KEYS = [
@@ -423,9 +636,9 @@ def upload():
 @login_required
 def dashboard():
     try:
-        merged = get_merged_for_analytics_from_sql()
-
-        if merged.empty:
+        m = fetch_dashboard_metrics_from_sql()
+        has_data = m.pop("has_data", False)
+        if not has_data:
             return render_template(
                 "dashboard.html",
                 total_spend="0.00",
@@ -444,63 +657,7 @@ def dashboard():
                 organic_values=[],
             )
 
-        # Total Spend
-        total_spend = f"{merged['spend'].sum():,.2f}"
-
-        # Total Transactions
-        total_transactions = int(merged["basket_num"].nunique())
-
-        # Top Departments
-        top_departments = (
-            merged.groupby("department")["spend"]
-            .sum()
-            .sort_values(ascending=False)
-            .head(5)
-        )
-
-        dept_labels = [str(x) for x in top_departments.index]
-        dept_values = [float(x) for x in top_departments.values]
-
-        # Spend Over Time (by week)
-        spend_time = (
-            merged.groupby("week_num")["spend"]
-            .sum()
-            .sort_index()
-        )
-
-        week_labels = [str(x) for x in spend_time.index]
-        week_values = [float(x) for x in spend_time.values]
-
-        demo_income_labels, demo_income_values = _spend_by_category_for_chart(
-            merged, "income_range", top_n=12
-        )
-        demo_children_labels, demo_children_values = _spend_by_category_for_chart(
-            merged, "children", top_n=10
-        )
-        brand_ty_labels, brand_ty_values = _spend_by_category_for_chart(
-            merged, "brand_ty", top_n=14
-        )
-        organic_labels, organic_values = _spend_by_category_for_chart(
-            merged, "natural_organic_flag", top_n=8
-        )
-
-        return render_template(
-            "dashboard.html",
-            total_spend=total_spend,
-            total_transactions=total_transactions,
-            dept_labels=dept_labels,
-            dept_values=dept_values,
-            week_labels=week_labels,
-            week_values=week_values,
-            demo_income_labels=demo_income_labels,
-            demo_income_values=demo_income_values,
-            demo_children_labels=demo_children_labels,
-            demo_children_values=demo_children_values,
-            brand_ty_labels=brand_ty_labels,
-            brand_ty_values=brand_ty_values,
-            organic_labels=organic_labels,
-            organic_values=organic_values,
-        )
+        return render_template("dashboard.html", **m)
 
     except Exception as e:
         return f"Dashboard error: {e}{_sql_error_user_hint(e)}"
@@ -510,9 +667,21 @@ def dashboard():
 @login_required
 def ml_insights():
     try:
-        merged = get_merged_for_analytics_from_sql()
+        data = fetch_ml_insights_from_sql()
+        if data is None:
+            return render_template(
+                "ml_insights.html",
+                top_clv=[],
+                basket_results=[],
+                basket_gb_rows=[],
+                high_risk_customers=[],
+                high_risk_count=0,
+                low_risk_count=0,
+            )
 
-        if merged.empty:
+        customer_summary = data["customer_summary"]
+        customer_summary = customer_summary[customer_summary["total_baskets"] > 0].copy()
+        if customer_summary.empty:
             return render_template(
                 "ml_insights.html",
                 top_clv=[],
@@ -526,34 +695,19 @@ def ml_insights():
         # -----------------------------
         # 1. CLV Prediction
         # -----------------------------
-        customer_summary = merged.groupby("hshd_num").agg(
-            total_spend=("spend", "sum"),
-            total_units=("units", "sum"),
-            total_baskets=("basket_num", "nunique"),
-            active_weeks=("week_num", "nunique")
-        ).reset_index()
-
         customer_summary["avg_basket_value"] = (
             customer_summary["total_spend"] / customer_summary["total_baskets"]
         ).round(2)
 
-        # Create a target variable for CLV.
-        # For this project, future CLV is estimated as 25% more than current total spend.
         customer_summary["estimated_future_clv"] = customer_summary["total_spend"] * 1.25
 
-        # Features used by the Linear Regression model
         X = customer_summary[
             ["total_spend", "total_units", "total_baskets", "active_weeks", "avg_basket_value"]
         ]
-
-        # Target variable
         y = customer_summary["estimated_future_clv"]
 
-        # Train Linear Regression model
         clv_model = LinearRegression()
         clv_model.fit(X, y)
-
-        # Predict CLV
         customer_summary["predicted_clv"] = clv_model.predict(X).round(2)
 
         top_clv = customer_summary.sort_values(
@@ -562,45 +716,15 @@ def ml_insights():
         ).head(10)
 
         # -----------------------------
-        # 2. Basket Analysis
+        # 2. Basket Analysis (pairs from capped line sample; GB on SQL basket aggregates)
         # -----------------------------
-        basket_pairs = (
-            merged.groupby(["basket_num", "commodity"])
-            .size()
-            .reset_index(name="count")
-        )
+        basket_results = _basket_pair_results_from_sample(data["pair_lines"])
 
-        basket_items = basket_pairs.groupby("basket_num")["commodity"].apply(list)
-
-        pair_counts = {}
-
-        for items in basket_items:
-            unique_items = list(set(items))
-            for i in range(len(unique_items)):
-                for j in range(i + 1, len(unique_items)):
-                    pair = tuple(sorted([unique_items[i], unique_items[j]]))
-                    pair_counts[pair] = pair_counts.get(pair, 0) + 1
-
-        top_pairs = sorted(pair_counts.items(), key=lambda x: x[1], reverse=True)[:10]
-
-        basket_results = [
-            {
-                "item_1": pair[0][0],
-                "item_2": pair[0][1],
-                "times_bought_together": pair[1]
-            }
-            for pair in top_pairs
-        ]
-
-        # Gradient Boosting on basket-level features (deliverable: ML for basket analysis)
         basket_gb_rows = []
         try:
-            bf = merged.groupby("basket_num", as_index=False).agg(
-                n_lines=("commodity", "count"),
-                n_commodity=("commodity", "nunique"),
-                n_department=("department", "nunique"),
-                basket_spend=("spend", "sum"),
-            )
+            bf = data["basket_agg"].copy()
+            if len(bf) > _ML_GB_MAX_BASKETS:
+                bf = bf.sample(n=_ML_GB_MAX_BASKETS, random_state=42)
             if len(bf) >= 40 and bf["basket_spend"].nunique() > 1:
                 med_spend = bf["basket_spend"].median()
                 bf["high_value_basket"] = (bf["basket_spend"] >= med_spend).astype(int)
@@ -609,8 +733,8 @@ def ml_insights():
                     yb = bf["high_value_basket"]
                     gb = GradientBoostingClassifier(
                         max_depth=3,
-                        n_estimators=80,
-                        learning_rate=0.08,
+                        n_estimators=48,
+                        learning_rate=0.1,
                         random_state=42,
                     )
                     gb.fit(Xb, yb)
@@ -629,24 +753,17 @@ def ml_insights():
         # -----------------------------
         # 3. Churn Risk
         # -----------------------------
-        latest_week = merged["week_num"].max()
-
-        churn_data = merged.groupby("hshd_num").agg(
-            last_purchase_week=("week_num", "max"),
-            total_spend=("spend", "sum"),
-            total_baskets=("basket_num", "nunique")
-        ).reset_index()
-
+        latest_week = data["latest_week"]
+        churn_data = data["churn_data"].copy()
         churn_data["weeks_since_last_purchase"] = (
             latest_week - churn_data["last_purchase_week"]
         )
-
         churn_data["churn_risk"] = churn_data["weeks_since_last_purchase"].apply(
             lambda x: "High Risk" if x >= 8 else "Low Risk"
         )
 
-        high_risk_count = churn_data[churn_data["churn_risk"] == "High Risk"].shape[0]
-        low_risk_count = churn_data[churn_data["churn_risk"] == "Low Risk"].shape[0]
+        high_risk_count = int((churn_data["churn_risk"] == "High Risk").sum())
+        low_risk_count = int((churn_data["churn_risk"] == "Low Risk").sum())
 
         high_risk_customers = churn_data.sort_values(
             by="weeks_since_last_purchase",
