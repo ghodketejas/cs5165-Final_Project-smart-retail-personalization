@@ -3,18 +3,33 @@
 {% block content %}
 <h2>Upload Latest Dataset</h2>
 
-<form method="POST" enctype="multipart/form-data" class="card p-4">
+<p>
+    This page allows updated retail datasets to be uploaded into the application.
+    The required files are Households, Transactions, and Products CSV files.
+</p>
 
-    <label>Households CSV</label>
+<div class="alert alert-info">
+    Required files:
+    <strong>400_households.csv</strong>,
+    <strong>400_transactions.csv</strong>,
+    <strong>400_products.csv</strong>
+</div>
+
+<form method="POST" enctype="multipart/form-data" class="card p-4 shadow-sm">
+
+    <label class="form-label">Households CSV</label>
     <input type="file" name="households" class="form-control mb-3" required>
 
-    <label>Transactions CSV</label>
+    <label class="form-label">Transactions CSV</label>
     <input type="file" name="transactions" class="form-control mb-3" required>
 
-    <label>Products CSV</label>
+    <label class="form-label">Products CSV</label>
     <input type="file" name="products" class="form-control mb-3" required>
 
     <button class="btn btn-success">Upload & Replace Data</button>
-
 </form>
+
+<div class="alert alert-secondary mt-4">
+    After upload, the Data Pull page can be used to test whether the updated dataset works correctly.
+</div>
 {% endblock %}

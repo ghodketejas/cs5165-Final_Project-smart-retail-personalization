@@ -75,6 +75,31 @@ def get_data_pull_from_sql(household_id):
     return df
 
 
+def get_merged_for_analytics_from_sql():
+    """
+    Full joined line-level data from Azure SQL, equivalent to the old
+    transactions + households + products merge used by Dashboard and ML Insights.
+    """
+    query = """
+        SELECT
+            t.HSHD_NUM AS hshd_num,
+            t.BASKET_NUM AS basket_num,
+            p.COMMODITY AS commodity,
+            t.SPEND AS spend,
+            t.UNITS AS units,
+            t.WEEK_NUM AS week_num,
+            p.DEPARTMENT AS department
+        FROM Transactions t
+        INNER JOIN Products p ON t.PRODUCT_NUM = p.PRODUCT_NUM
+        INNER JOIN Households h ON t.HSHD_NUM = h.HSHD_NUM
+    """
+    conn = get_sql_connection()
+    df = pd.read_sql(query, conn)
+    conn.close()
+    df.columns = [str(c).lower() for c in df.columns]
+    return df
+
+
 DATA_PULL_SORT_KEYS = [
     "hshd_num",
     "basket_num",
@@ -100,27 +125,6 @@ def _sort_data_pull_results(df, sort_by, ascending):
     if key in df.columns:
         return df.sort_values(by=key, ascending=ascending, na_position="last")
     return df
-
-
-def clean_columns(df):
-    df.columns = df.columns.str.strip()
-    df.columns = df.columns.str.lower()
-    return df
-
-
-def load_data():
-    households = pd.read_csv(HOUSEHOLDS_FILE)
-    transactions = pd.read_csv(TRANSACTIONS_FILE)
-    products = pd.read_csv(PRODUCTS_FILE)
-
-    households = clean_columns(households)
-    transactions = clean_columns(transactions)
-    products = clean_columns(products)
-
-    merged = transactions.merge(households, on="hshd_num", how="left")
-    merged = merged.merge(products, on="product_num", how="left")
-
-    return households, transactions, products, merged
 
 
 @app.route("/")
@@ -200,13 +204,24 @@ def upload():
 @app.route("/dashboard")
 def dashboard():
     try:
-        households, transactions, products, merged = load_data()
+        merged = get_merged_for_analytics_from_sql()
+
+        if merged.empty:
+            return render_template(
+                "dashboard.html",
+                total_spend="0.00",
+                total_transactions=0,
+                dept_labels=[],
+                dept_values=[],
+                week_labels=[],
+                week_values=[],
+            )
 
         # Total Spend
         total_spend = f"{merged['spend'].sum():,.2f}"
 
         # Total Transactions
-        total_transactions = merged["basket_num"].nunique()
+        total_transactions = int(merged["basket_num"].nunique())
 
         # Top Departments
         top_departments = (
@@ -216,8 +231,8 @@ def dashboard():
             .head(5)
         )
 
-        dept_labels = list(top_departments.index)
-        dept_values = list(top_departments.values)
+        dept_labels = [str(x) for x in top_departments.index]
+        dept_values = [float(x) for x in top_departments.values]
 
         # Spend Over Time (by week)
         spend_time = (
@@ -226,8 +241,8 @@ def dashboard():
             .sort_index()
         )
 
-        week_labels = list(spend_time.index)
-        week_values = list(spend_time.values)
+        week_labels = [str(x) for x in spend_time.index]
+        week_values = [float(x) for x in spend_time.values]
 
         return render_template(
             "dashboard.html",
@@ -246,7 +261,17 @@ def dashboard():
 @app.route("/ml-insights")
 def ml_insights():
     try:
-        households, transactions, products, merged = load_data()
+        merged = get_merged_for_analytics_from_sql()
+
+        if merged.empty:
+            return render_template(
+                "ml_insights.html",
+                top_clv=[],
+                basket_results=[],
+                high_risk_customers=[],
+                high_risk_count=0,
+                low_risk_count=0,
+            )
 
         # -----------------------------
         # 1. CLV Prediction

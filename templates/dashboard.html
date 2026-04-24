@@ -1,49 +1,61 @@
 {% extends "base.html" %}
 
 {% block content %}
-
 <h2>Retail KPI Dashboard</h2>
 
-<div class="row mb-4">
+<p>
+    This dashboard explores retail engagement, spending patterns, and product category performance.
+</p>
 
+<div class="row mb-4">
     <div class="col-md-6">
-        <div class="card p-3">
+        <div class="card p-3 shadow-sm">
             <h5>Total Spend</h5>
             <h3>${{ total_spend }}</h3>
+            <p class="text-muted">Total customer spending across all transactions.</p>
         </div>
     </div>
 
     <div class="col-md-6">
-        <div class="card p-3">
+        <div class="card p-3 shadow-sm">
             <h5>Total Transactions</h5>
             <h3>{{ total_transactions }}</h3>
+            <p class="text-muted">Unique shopping baskets in the dataset.</p>
         </div>
     </div>
-
 </div>
 
 <div class="row">
-
-    <div class="col-md-6">
-        <div class="card p-3">
-            <h5>Top Departments</h5>
+    <div class="col-md-6 mb-4">
+        <div class="card p-3 shadow-sm">
+            <h5>Top Departments by Spend</h5>
+            <p class="text-muted">
+                Identifies departments that generate the most customer spending.
+            </p>
             <canvas id="deptChart"></canvas>
         </div>
     </div>
 
-    <div class="col-md-6">
-        <div class="card p-3">
+    <div class="col-md-6 mb-4">
+        <div class="card p-3 shadow-sm">
             <h5>Spend Over Time</h5>
+            <p class="text-muted">
+                Shows how customer engagement and spending change over time.
+            </p>
             <canvas id="timeChart"></canvas>
         </div>
     </div>
+</div>
 
+<div class="alert alert-success">
+    Business Insight: Departments with higher spending can be prioritized for promotions,
+    inventory planning, and customer personalization strategies.
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
-    const deptChart = new Chart(document.getElementById('deptChart'), {
+    new Chart(document.getElementById('deptChart'), {
         type: 'bar',
         data: {
             labels: {{ dept_labels|tojson }},
@@ -54,16 +66,16 @@
         }
     });
 
-    const timeChart = new Chart(document.getElementById('timeChart'), {
+    new Chart(document.getElementById('timeChart'), {
         type: 'line',
         data: {
             labels: {{ week_labels|tojson }},
             datasets: [{
                 label: 'Spend',
-                data: {{ week_values|tojson }}
+                data: {{ week_values|tojson }},
+                tension: 0.3
             }]
         }
     });
 </script>
-
 {% endblock %}

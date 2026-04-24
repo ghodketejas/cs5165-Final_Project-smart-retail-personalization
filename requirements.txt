@@ -1,8 +1,7 @@
 Flask==3.0.0
 gunicorn==21.2.0
-pandas
-numpy
-scikit-learn
-joblib
-pyodbc
-sqlalchemy
+pandas==2.2.2
+numpy==1.26.4
+scikit-learn==1.4.2
+pyodbc==5.1.0
+sqlalchemy==2.0.30
