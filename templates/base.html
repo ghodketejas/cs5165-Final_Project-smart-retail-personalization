@@ -13,12 +13,17 @@
 
         <div class="navbar-nav">
             <a class="nav-link" href="/">Home</a>
-            <a class="nav-link" href="/register">Register</a>
-            <a class="nav-link" href="/login">Login</a>
+            {% if session.get('user_id') %}
             <a class="nav-link" href="/data-pull">Data Pull</a>
             <a class="nav-link" href="/upload">Upload</a>
             <a class="nav-link" href="/dashboard">Dashboard</a>
             <a class="nav-link" href="/ml-insights">ML Insights</a>
+            <span class="nav-link text-white-50 small">Hi, {{ session.get('username', 'user') }}</span>
+            <a class="nav-link" href="/logout">Logout</a>
+            {% else %}
+            <a class="nav-link" href="/register">Register</a>
+            <a class="nav-link" href="/login">Login</a>
+            {% endif %}
         </div>
     </div>
 </nav>

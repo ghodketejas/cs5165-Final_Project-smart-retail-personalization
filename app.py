@@ -1,11 +1,16 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, session
 import pandas as pd
 import os
 import pyodbc
+from functools import wraps
+from werkzeug.security import check_password_hash, generate_password_hash
+from typing import Optional
+
 from sklearn.linear_model import LinearRegression
 
 app = Flask(__name__)
-app.secret_key = "retail_project_secret_key"
+# Azure App Service: set FLASK_SECRET_KEY in Application settings (or SECRET_KEY).
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("SECRET_KEY") or "dev-unsafe-key-change-locally"
 
 DATA_FOLDER = "data"
 
@@ -19,16 +24,156 @@ SQL_USERNAME = os.getenv("AZURE_SQL_USERNAME")
 SQL_PASSWORD = os.getenv("AZURE_SQL_PASSWORD")
 
 
+def _require_sql_settings():
+    required = {
+        "AZURE_SQL_SERVER": SQL_SERVER,
+        "AZURE_SQL_DATABASE": SQL_DATABASE,
+        "AZURE_SQL_USERNAME": SQL_USERNAME,
+        "AZURE_SQL_PASSWORD": SQL_PASSWORD,
+    }
+    missing = [k for k, v in required.items() if v is None or (isinstance(v, str) and not v.strip())]
+    if missing:
+        raise RuntimeError(
+            "Missing or empty environment variables: "
+            + ", ".join(missing)
+            + ". In Azure: App Service → Environment variables, add the AZURE_SQL_* values, then Save and restart the app."
+        )
+
+
+def _sql_error_user_hint(exc) -> str:
+    """App Service → SQL often fails with 10060 until the SQL firewall allows the app."""
+    s = str(exc)
+    if any(
+        x in s
+        for x in (
+            "10060",
+            "08S01",
+            "08001",
+            "TCP Provider",
+            "ETIMEDOUT",
+            "timed out",
+        )
+    ):
+        return (
+            " | Hint: The app cannot reach the database (network / firewall). "
+            "In Azure Portal open your *SQL server* (logical server) → *Networking* & Security / *Networking* → "
+            "set *Public network access* to *Enabled* if you are not using a private endpoint, then either "
+            "turn ON *Allow Azure services and resources to access this server* (simplest for class projects) "
+            "OR add a firewall rule for each *Outbound* IP of your App Service (App Service → *Overview* → *Outbound IP addresses*). "
+            "Wait ~1–2 minutes after saving. Also confirm *AZURE_SQL_SERVER* is the full host: yourserver.database.windows.net"
+        )
+    return ""
+
+
+def _hash_password(plain: str) -> str:
+    # pbkdf2:sha256 keeps string length well under common NVARCHAR(256) column limits
+    return generate_password_hash(plain, method="pbkdf2:sha256", salt_length=16)
+
+
+def _safe_next_path(candidate) -> Optional[str]:
+    if not candidate or not isinstance(candidate, str):
+        return None
+    c = candidate.strip()
+    if c.startswith("/") and not c.startswith("//") and ".." not in c:
+        return c
+    return None
+
+
+def register_user_in_db(username: str, email: str, password: str):
+    """
+    Returns (ok: bool, error_message: str | None)
+    """
+    username = (username or "").strip()
+    email = (email or "").strip()
+    if len(username) < 3 or len(username) > 64:
+        return False, "Username must be between 3 and 64 characters."
+    if "@" not in email or len(email) > 256:
+        return False, "Please enter a valid email."
+    if len(password) < 6:
+        return False, "Password must be at least 6 characters."
+    if len(password) > 200:
+        return False, "Password is too long."
+
+    conn = get_sql_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM AppUsers WHERE username = ?", (username,))
+        if cur.fetchone():
+            return False, "That username is already taken."
+        cur.execute("SELECT 1 FROM AppUsers WHERE LOWER(email) = LOWER(?)", (email,))
+        if cur.fetchone():
+            return False, "That email is already registered."
+        ph = _hash_password(password)
+        cur.execute(
+            "INSERT INTO AppUsers (username, email, pass_hash) VALUES (?, ?, ?)",
+            (username, email, ph),
+        )
+        conn.commit()
+        return True, None
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        em = str(e)
+        if "UNIQUE" in em.upper() or "2627" in em:
+            return False, "That username or email is already in use."
+        return False, f"Could not register: {e}"
+    finally:
+        conn.close()
+
+
+def verify_user_login(username: str, password: str):
+    """Returns user_id (int) if ok, else None."""
+    username = (username or "").strip()
+    if not username or not password:
+        return None
+    conn = get_sql_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT user_id, pass_hash FROM AppUsers WHERE username = ?",
+            (username,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        uid, ph = int(row[0]), row[1]
+        if ph and check_password_hash(ph, password):
+            return uid
+        return None
+    finally:
+        conn.close()
+
+
+def login_required(view_func):
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        if session.get("user_id") is None:
+            nxt = request.path
+            if request.query_string:
+                nxt = nxt + "?" + request.query_string.decode()
+            return redirect(url_for("login", next=nxt))
+        return view_func(*args, **kwargs)
+
+    return wrapped
+
+
 def get_sql_connection():
+    _require_sql_settings()
+    server = str(SQL_SERVER).strip()
+    database = str(SQL_DATABASE).strip()
+    username = str(SQL_USERNAME).strip()
+    password = str(SQL_PASSWORD)  # allow symbols; do not strip
     conn_str = (
         "DRIVER={ODBC Driver 17 for SQL Server};"
-        f"SERVER={SQL_SERVER};"
-        f"DATABASE={SQL_DATABASE};"
-        f"UID={SQL_USERNAME};"
-        f"PWD={SQL_PASSWORD};"
+        f"SERVER={server};"
+        f"DATABASE={database};"
+        f"UID={username};"
+        f"PWD={password};"
         "Encrypt=yes;"
         "TrustServerCertificate=no;"
-        "Connection Timeout=60;"
+        "Connection Timeout=120;"
     )
     return pyodbc.connect(conn_str)
 
@@ -134,21 +279,62 @@ def index():
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
+    if session.get("user_id") is not None:
+        return redirect(url_for("data_pull"))
     if request.method == "POST":
-        flash("Registration successful. This demo form satisfies the username, password, and email requirement.")
-        return redirect(url_for("login"))
+        un = request.form.get("username", "")
+        em = request.form.get("email", "")
+        pw = request.form.get("password", "")
+        try:
+            ok, err = register_user_in_db(un, em, pw)
+        except Exception as e:
+            flash(f"Registration failed: {e}{_sql_error_user_hint(e)}")
+            return render_template("register.html")
+        if ok:
+            flash("Account created. Please sign in.")
+            return redirect(url_for("login"))
+        flash(err or "Registration failed.")
     return render_template("register.html")
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if request.method == "POST":
-        flash("Login successful.")
+    if session.get("user_id") is not None:
+        nxt = _safe_next_path(request.args.get("next") or request.form.get("next"))
+        if nxt:
+            return redirect(nxt)
         return redirect(url_for("data_pull"))
-    return render_template("login.html")
+    if request.method == "POST":
+        un = request.form.get("username", "")
+        pw = request.form.get("password", "")
+        try:
+            uid = verify_user_login(un, pw)
+        except Exception as e:
+            flash(f"Sign-in failed: {e}{_sql_error_user_hint(e)}")
+            next_url = request.form.get("next") or request.args.get("next") or ""
+            return render_template("login.html", next_url=next_url)
+        if uid is not None:
+            session["user_id"] = uid
+            session["username"] = un.strip()
+            flash("You are signed in.")
+            nxt = _safe_next_path(request.form.get("next") or request.args.get("next"))
+            if nxt:
+                return redirect(nxt)
+            return redirect(url_for("data_pull"))
+        flash("Invalid username or password.")
+    next_url = request.form.get("next") or request.args.get("next") or ""
+    return render_template("login.html", next_url=next_url)
+
+
+@app.route("/logout", methods=["GET", "POST"])
+def logout():
+    session.clear()
+    flash("You have been signed out.")
+    return redirect(url_for("index"))
 
 
 @app.route("/data-pull", methods=["GET", "POST"])
+@login_required
 def data_pull():
     household_id = request.values.get("hshd_num", 10)
     sort_by = request.values.get("sort_by", "hshd_num")
@@ -164,7 +350,7 @@ def data_pull():
         results = _sort_data_pull_results(results, sort_by, ascending)
 
     except Exception as e:
-        flash(f"Azure SQL error: {e}")
+        flash(f"Azure SQL error: {e}{_sql_error_user_hint(e)}")
         results = pd.DataFrame()
 
     no_results = results.empty
@@ -180,6 +366,7 @@ def data_pull():
 
 
 @app.route("/upload", methods=["GET", "POST"])
+@login_required
 def upload():
     if request.method == "POST":
         try:
@@ -202,6 +389,7 @@ def upload():
 
 
 @app.route("/dashboard")
+@login_required
 def dashboard():
     try:
         merged = get_merged_for_analytics_from_sql()
@@ -255,10 +443,11 @@ def dashboard():
         )
 
     except Exception as e:
-        return f"Dashboard error: {e}"
+        return f"Dashboard error: {e}{_sql_error_user_hint(e)}"
 
 
 @app.route("/ml-insights")
+@login_required
 def ml_insights():
     try:
         merged = get_merged_for_analytics_from_sql()
@@ -379,7 +568,7 @@ def ml_insights():
         )
 
     except Exception as e:
-        return f"ML Insights error: {e}"
+        return f"ML Insights error: {e}{_sql_error_user_hint(e)}"
 
 
 if __name__ == "__main__":

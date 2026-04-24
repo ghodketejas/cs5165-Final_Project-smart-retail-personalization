@@ -16,6 +16,12 @@
         machine learning insights for retail decision-making.
     </p>
 
+    {% if not session.get('user_id') %}
+    <p class="alert alert-info mb-0">
+        <strong>Sign in</strong> (or register) to use household search, upload, the dashboard, and ML insights.
+    </p>
+    {% endif %}
+
     <div class="mt-4">
         <a href="/data-pull" class="btn btn-primary me-2">Search Household Data</a>
         <a href="/dashboard" class="btn btn-success me-2">View Dashboard</a>
