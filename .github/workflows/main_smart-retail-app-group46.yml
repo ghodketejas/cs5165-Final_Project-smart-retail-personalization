@@ -31,3 +31,10 @@ jobs:
           app-name: smart-retail-app-group46
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: release.zip
+      
+      - name: Validate deployment credentials
+        run: |
+          if [ -z "${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}" ]; then
+            echo "Error: AZURE_WEBAPP_PUBLISH_PROFILE secret is not set"
+            exit 1
+          fi
