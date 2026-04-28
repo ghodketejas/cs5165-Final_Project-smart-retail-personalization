@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import urllib.parse
 import pyodbc
+import time
 from functools import wraps
 from sqlalchemy import create_engine, text
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -178,7 +179,29 @@ def get_sql_connection():
         "TrustServerCertificate=no;"
         "Connection Timeout=120;"
     )
-    return pyodbc.connect(conn_str)
+    # Retry transient login/network hiccups (common on first cold connection in Azure).
+    max_attempts = 3
+    base_delay_s = 1.0
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return pyodbc.connect(conn_str)
+        except pyodbc.Error as e:
+            msg = str(e)
+            transient = any(
+                t in msg
+                for t in (
+                    "HYT00",
+                    "HYT01",
+                    "08001",
+                    "08S01",
+                    "10060",
+                    "timed out",
+                    "timeout",
+                )
+            )
+            if attempt == max_attempts or not transient:
+                raise
+            time.sleep(base_delay_s * attempt)
 
 
 _sqlalchemy_engine = None
